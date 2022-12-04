@@ -1,8 +1,7 @@
-import { useState, useEffect} from 'react'
-
+import { useState, useEffect, useRef } from 'react'
 import { Container, Row, Button, Navbar, Nav, Col, ProgressBar } from 'react-bootstrap'
+import { Canvas, useFrame } from '@react-three/fiber'
 import SpotifyLogo from './Spotify_Icon_RGB_White.png'
-
 import SpotifyWebApi from 'spotify-web-api-js'
 
 function App() {
@@ -12,7 +11,7 @@ function App() {
     RESPONSE_TYPE: 'token',
     REDIRECT_URI: 'http://localhost:3000',
     SCOPE: 'user-read-playback-state user-modify-playback-state',
-  }  
+  }
   
   // Find access token
   const [token, setToken] = useState("")
@@ -42,9 +41,9 @@ function App() {
     spotifyApi
     .getMyCurrentPlaybackState()
     .then(
-      function (data) {
-        console.log(data)
+      data => {
         setPlaybackState(data)
+        console.log(playbackState)
       },
       (err) => {
         console.error(err);
@@ -54,15 +53,12 @@ function App() {
 
   let [pause, setPause] = useState(true)
   const startPlayback = () => {
-    spotifyApi
-    .play()
-    .then(
-      () => {
+    spotifyApi.play()
+      .then(() => {
         console.log('Starting playback')
         setPause(false)
         getPlaybackState()
-      },
-      (err) => {
+      }, (err) => {
         console.error(err);
       }
     )
@@ -174,7 +170,7 @@ function App() {
                 ${credentials.AUTH_ENDPOINT}?client_id=${credentials.CLIENT_ID}&response_type=${credentials.RESPONSE_TYPE}&scope=${credentials.SCOPE}&redirect_uri=${credentials.REDIRECT_URI}`
                 } 
                 size='lg' className = 'rounded-pill me-3' style={{background: '#1DB954'}}>
-                  Login <img src={SpotifyLogo} style={style.loginButton} />
+                  Login <img alt={"Spotify Logo"} src={SpotifyLogo} style={style.loginButton} />
                 </Button>
                 <Button href='https://github.com/nartexyu/Audio-Visualizer' variant='link' target='_blank'>
                   <svg  width='1.5rem' height='1.5rem'><path d={style.githubSvgPath}/></svg>
@@ -201,7 +197,14 @@ function App() {
           </Navbar>
           
           {/* Center */}
+
           <Container fluid className='d-flex align-items-center justify-content-center' style={style.jumbotron}>
+            <Canvas>
+              <ambientLight />
+              <pointLight position={[10, 10, 10]} />
+              <Box position={[-1.2, 0, 0]} />
+              <Box position={[1.2, 0, 0]} />
+            </Canvas>
             <Button onClick={getPlaybackState}>Get Currently Playing</Button>
           </Container>
 
@@ -210,7 +213,7 @@ function App() {
             <Col>
                 <Row className='d-flex align-items-end'>
                   <Col md={3} className='text-center'>
-                    <img src={playbackState ? playbackState.item.album.images[1].url : 'https://via.placeholder.com/96'} style={{height:'96px'}}></img>
+                    <img src={playbackState ? playbackState.item.album.images[1].url : 'https://via.placeholder.com/96'} alt={":)"} style={{height:'96px'}}></img>
                   </Col>
                   <Col className='p-0'>
                     <Row>
@@ -267,5 +270,29 @@ function App() {
     </div>
   );
 }
+
+function Box(props) {
+  // This reference gives us direct access to the THREE.Mesh object
+  const ref = useRef()
+  // Hold state for hovered and clicked events
+  const [hovered, hover] = useState(false)
+  const [clicked, click] = useState(false)
+  // Subscribe this component to the render-loop, rotate the mesh every frame
+  useFrame((state, delta) => (ref.current.rotation.x += 0.01))
+  // Return the view, these are regular Threejs elements expressed in JSX
+  return (
+    <mesh
+      {...props}
+      ref={ref}
+      scale={clicked ? 1.5 : 1}
+      onClick={(event) => click(!clicked)}
+      onPointerOver={(event) => hover(true)}
+      onPointerOut={(event) => hover(false)}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color={hovered ? 'hotpink' : 'orange'} />
+    </mesh>
+  )
+}
+
 
 export default App;
