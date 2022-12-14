@@ -24,7 +24,6 @@ function App() {
       
       window.localStorage.setItem("token", token)
     }
-    
     setToken(token)
   }, [])
   
@@ -33,17 +32,64 @@ function App() {
     window.localStorage.removeItem("token")
   }
 
+  // Spotify API
   let spotifyApi = new SpotifyWebApi() 
   spotifyApi.setAccessToken(token)
 
+  // Spotify API States
   const [playbackState, setPlaybackState] = useState(false)
+  const [features, setFeatures] = useState("")
+  const [analysis, setAnalysis] = useState("")
+  const [pause, setPause] = useState(true)
+
+  // Gets playback state of active spotify session and sets response to playbackState. Then gets audio features and audio analysis
   const getPlaybackState = () => {
     spotifyApi
     .getMyCurrentPlaybackState()
-    .then(
-      data => {
-        setPlaybackState(data)
-        console.log(playbackState)
+    .then((res) => {
+      console.log(res)
+      const timeStampSeconds = res.progress_ms / 1000
+      spotifyApi.getAudioFeaturesForTrack(res.item.id)
+      .then((features) => {
+        console.log(features)
+        setFeatures(
+          {
+            acousticness: features.acousticness,
+            danceability: features.danceability,
+            energy: features.engergy,
+            instrumentalness: features.instrumentalness,
+            liveness: features.liveness,
+            loudness: features.loudness,
+            speechiness: features.speechiness,
+            tempo: features.tempo,
+            timeSignature: features.time_signature
+          }
+        )
+      })
+      spotifyApi.getAudioAnalysisForTrack(res.item.id)
+      .then((analysis) => {
+        const result = analysis.segments.filter(trackDataPoint => trackDataPoint.start + trackDataPoint.duration > timeStampSeconds)
+        console.log(result[0])
+        setAnalysis(
+          {
+            key: analysis.track.key,
+            confidence: result[0].confidence,
+            loudnessMax: result[0].loudness_max,
+            pitches: result[0].pitches,
+            timbre: result[0].timbre
+          }
+        )
+      })
+      setPlaybackState(
+        {
+          name: res.item.name,
+          artist: res.item.artists[0].name,
+          img: res.item.album.images[1].url,
+          progress: millisToMinutesAndSeconds(res.progress_ms),
+          duration: millisToMinutesAndSeconds(res.item.duration_ms),
+          isPlaying: res.is_playing
+        }
+      )
       },
       (err) => {
         console.error(err);
@@ -51,34 +97,36 @@ function App() {
     )
   }
 
-  let [pause, setPause] = useState(true)
+  // Starts playback of active spotify session
   const startPlayback = () => {
     spotifyApi.play()
       .then(() => {
         console.log('Starting playback')
-        setPause(false)
         getPlaybackState()
+        setPause(false)
       }, (err) => {
         console.error(err);
       }
     )
   }
 
+  // Pauses playback of active spotify session
   const pausePlayback = () => {
     spotifyApi
     .pause()
     .then(
       () => {
         console.log('Pausing playback')
-        setPause(true)
         getPlaybackState()
+        setPause(true)
       },
       (err) => {
         console.error(err);
       }
     )
   }
-
+  
+  // Skips to previous song 
   const prevSong = () => {
     spotifyApi
     .skipToPrevious()
@@ -91,9 +139,10 @@ function App() {
       (err) => {
         console.error(err);
       }
-    )
-  }
+      )
+    }
 
+  // Skips to next song 
   const nextSong = () => {
     spotifyApi
     .skipToNext()
@@ -106,15 +155,32 @@ function App() {
       (err) => {
         console.error(err);
       }
-    )
-  }
-
+      )
+    }
+  
+  // If session not paused, every 200ms, calls getPlaybackState to update state. useEffect triggered by pause state
+  useEffect(() => {
+    let interval = null
+    if (!pause) {
+      interval = setInterval(() => {
+        getPlaybackState()
+      }, 250);
+    } else {
+      clearInterval(interval);
+    }
+    return () => {
+      clearInterval(interval);
+    }
+  }, [pause])
+  
+  // Converts song time in ms to minutes and seconds (XX:XX) format 
   const millisToMinutesAndSeconds = (millis) => {
     let minutes = Math.floor(millis / 60000);
     let seconds = ((millis % 60000) / 1000).toFixed(0);
     return minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
   }
 
+  // Styling object
   const style = {
     container: {
       height: '100vh', 
@@ -135,10 +201,15 @@ function App() {
       background: '#1DB954', 
       opacity: '0.75'
     },
+    spotifyColor: {
+      background: '#1DB954'
+    },
     jumbotron: {
-      height:'100vh', 
+      height:'100vh',
+      width: '100vw', 
       zIndex: '1', 
-      background:'rgba(211,211,211,0.1'
+      background:'rgba(211,211,211,0.1',
+      padding: '0'
     },
     footer: {
       background: 'rgba(20,20,20,0.1)', 
@@ -156,6 +227,9 @@ function App() {
     ,
     nextSvgPath: 
       'M2 24l18-12-18-12v24zm19-24v24h1v-24h-1zm-2.803 12l-15.197 10.132v-20.263l15.197 10.131z'
+    ,
+    refreshSvgPath:
+      'M7 9h-7v-7h1v5.2c1.853-4.237 6.083-7.2 11-7.2 6.623 0 12 5.377 12 12s-5.377 12-12 12c-6.286 0-11.45-4.844-11.959-11h1.004c.506 5.603 5.221 10 10.955 10 6.071 0 11-4.929 11-11s-4.929-11-11-11c-4.66 0-8.647 2.904-10.249 7h5.249v1z'
   }
 
   return (
@@ -169,7 +243,7 @@ function App() {
                 {`
                 ${credentials.AUTH_ENDPOINT}?client_id=${credentials.CLIENT_ID}&response_type=${credentials.RESPONSE_TYPE}&scope=${credentials.SCOPE}&redirect_uri=${credentials.REDIRECT_URI}`
                 } 
-                size='lg' className = 'rounded-pill me-3' style={{background: '#1DB954'}}>
+                size='lg' className = 'rounded-pill me-3' style={style.spotifyColor}>
                   Login <img alt={"Spotify Logo"} src={SpotifyLogo} style={style.loginButton} />
                 </Button>
                 <Button href='https://github.com/nartexyu/Audio-Visualizer' variant='link' target='_blank'>
@@ -198,14 +272,29 @@ function App() {
           
           {/* Center */}
 
-          <Container fluid className='d-flex align-items-center justify-content-center' style={style.jumbotron}>
-            <Canvas>
+          <Container fluid className='d-flex align-items-center justify-content-center text-center' style={style.jumbotron}>
+            {/* <Canvas style={{height: '100vh', width: '100vw'}}>
               <ambientLight />
               <pointLight position={[10, 10, 10]} />
               <Box position={[-1.2, 0, 0]} />
               <Box position={[1.2, 0, 0]} />
-            </Canvas>
-            <Button onClick={getPlaybackState}>Get Currently Playing</Button>
+            </Canvas> */}
+
+            {/* Temporary just to show data changing */}
+            <Col lg={4}>
+              Playback State: {"\n"}
+              {JSON.stringify(playbackState, null , '\n')}
+            </Col> 
+
+            <Col lg={4}>
+              Features State: {"\n"}
+              {JSON.stringify(features, null , '\n')}
+            </Col>
+              
+            <Col lg={4}>
+              Analysis State: {"\n"}
+              {JSON.stringify(analysis, null , '\n')}
+            </Col>
           </Container>
 
           {/* Footer */}
@@ -213,14 +302,14 @@ function App() {
             <Col>
                 <Row className='d-flex align-items-end'>
                   <Col md={3} className='text-center'>
-                    <img src={playbackState ? playbackState.item.album.images[1].url : 'https://via.placeholder.com/96'} alt={":)"} style={{height:'96px'}}></img>
+                    <img src={playbackState ? playbackState.img : 'https://via.placeholder.com/96'} alt={":)"} style={{height:'96px'}}></img>
                   </Col>
                   <Col className='p-0'>
                     <Row>
-                      <h4 className='mb-0'>{playbackState ? playbackState.item.name : `Song Name`}</h4>
+                      <h4 className='mb-0'>{playbackState ? playbackState.name : `Song Name`}</h4>
                     </Row>
                     <Row>
-                      <h5 className='mb-0'>{playbackState ? playbackState.item.artists[0].name : `Artist`}</h5>
+                      <h5 className='mb-0'>{playbackState ? playbackState.artist : `Artist`}</h5>
                     </Row>
                   </Col>
                 </Row>
@@ -251,18 +340,21 @@ function App() {
               </Row>
               <Row>
                 <Col md={1}>
-                  <h6>{playbackState ? millisToMinutesAndSeconds(playbackState.progress_ms) : `00:00`}</h6>
+                  <h6>{playbackState ? playbackState.progress : `00:00`}</h6>
                 </Col>
                 <Col md={10}>
-                  <ProgressBar now={playbackState ? playbackState.progress_ms / playbackState.item.duration_ms * 100 : 0}/>
+                  <ProgressBar variant="light" now={playbackState ? playbackState.progress / playbackState.duration * 100 : 0}/>
                 </Col>
                 <Col md={1}>
-                  <h6>{playbackState ? millisToMinutesAndSeconds(playbackState.item.duration_ms) : `00:00`}</h6>
+                  <h6>{playbackState ? playbackState.duration : `00:00`}</h6>
                 </Col>
               </Row>
             </Col>
             
-            <Col>
+            <Col className='d-flex justify-content-end'>
+              <Button variant="link" className='me-3'>
+              <svg width='1.5rem' height='1.5rem' className='d-block' onClick={getPlaybackState}><path d={style.refreshSvgPath}/></svg>
+              </Button>
             </Col>
           </Navbar>
         </div>
