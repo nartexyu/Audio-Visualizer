@@ -38,8 +38,11 @@ function App() {
 
   // Spotify API States
   const [playbackState, setPlaybackState] = useState(false)
+  const [playTime, setPlayTime] = useState("")
   const [features, setFeatures] = useState("")
   const [analysis, setAnalysis] = useState("")
+  const [segmentData, setSegmentData] = useState("")
+  const [segmentIndex, setSegmentIndex] = useState("")
   const [pause, setPause] = useState(true)
 
   // Gets playback state of active spotify session and sets response to playbackState. Then gets audio features and audio analysis
@@ -47,52 +50,85 @@ function App() {
     spotifyApi
     .getMyCurrentPlaybackState()
     .then((res) => {
-      console.log(res)
-      const timeStampSeconds = res.progress_ms / 1000
+      // console.log(res)
       spotifyApi.getAudioFeaturesForTrack(res.item.id)
       .then((features) => {
-        console.log(features)
+        // console.log(features)
         setFeatures(
           {
             acousticness: features.acousticness,
             danceability: features.danceability,
-            energy: features.engergy,
+            energy: features.energy,
             instrumentalness: features.instrumentalness,
             liveness: features.liveness,
             loudness: features.loudness,
             speechiness: features.speechiness,
             tempo: features.tempo,
-            timeSignature: features.time_signature
+            timeSignature: features.time_signature,
+            valence: features.valence
           }
         )
       })
       spotifyApi.getAudioAnalysisForTrack(res.item.id)
       .then((analysis) => {
-        const result = analysis.segments.filter(trackDataPoint => trackDataPoint.start + trackDataPoint.duration > timeStampSeconds)
-        console.log(result[0])
+        // console.log(analysis)
         setAnalysis(
           {
             key: analysis.track.key,
-            confidence: result[0].confidence,
-            loudnessMax: result[0].loudness_max,
-            pitches: result[0].pitches,
-            timbre: result[0].timbre
+            keyConf: analysis.track.key_confidence,
+            mode: analysis.track.mode,
+            segments: analysis.segments,
+            sections: analysis.sections
           }
         )
+        let bSearchSegment = bSearch(analysis.segments, res.progress_ms / 1000)
+        setSegmentIndex(bSearchSegment)
+        setSegmentData(analysis.segments[bSearchSegment])
       })
       setPlaybackState(
         {
           name: res.item.name,
           artist: res.item.artists[0].name,
-          img: res.item.album.images[1].url,
-          progress: millisToMinutesAndSeconds(res.progress_ms),
-          duration: millisToMinutesAndSeconds(res.item.duration_ms),
+          img: res.item.album.images[1].url
+        }
+      )
+      setPlayTime(
+        {
+          progress: res.progress_ms,
+          duration: res.item.duration_ms,
           isPlaying: res.is_playing
+        }
+      )
+    },
+      (err) => {
+        console.error(err)
+      }
+    )
+  }
+
+  // Gets current progress time
+  const getTimeStamp = () => {
+    spotifyApi
+    .getMyCurrentPlaybackState()
+    .then((res) => {
+      // console.log(res)
+      setPlayTime(
+        {
+          progress: res.progress_ms,
+          duration: res.item.duration_ms,
+          isPlaying: res.is_playing
+        }
+      )
+      setPlaybackState(
+        {
+          name: res.item.name,
+          artist: res.item.artists[0].name,
+          img: res.item.album.images[1].url
         }
       )
       },
       (err) => {
-        console.error(err);
+        console.error(err)
       }
     )
   }
@@ -103,9 +139,10 @@ function App() {
       .then(() => {
         console.log('Starting playback')
         getPlaybackState()
+        getTimeStamp()
         setPause(false)
       }, (err) => {
-        console.error(err);
+        console.error(err)
       }
     )
   }
@@ -118,10 +155,11 @@ function App() {
       () => {
         console.log('Pausing playback')
         getPlaybackState()
+        getTimeStamp()
         setPause(true)
       },
       (err) => {
-        console.error(err);
+        console.error(err)
       }
     )
   }
@@ -133,11 +171,12 @@ function App() {
     .then(
       () => {
         console.log('Skipping to previous song')
+        setSegmentData()
         getPlaybackState()
         setPause(false)
       },
       (err) => {
-        console.error(err);
+        console.error(err)
       }
       )
     }
@@ -149,35 +188,81 @@ function App() {
     .then(
       () => {
         console.log('Skipping to next song')
+        setSegmentData()
         getPlaybackState()
         setPause(false)
       },
       (err) => {
-        console.error(err);
+        console.error(err)
       }
-      )
-    }
+    )
+  }
+
+  const refreshStates = () => {
+    setSegmentData()
+    getPlaybackState()
+  }
   
-  // If session not paused, every 200ms, calls getPlaybackState to update state. useEffect triggered by pause state
+  // If session not paused, every 1000ms, add 1 second to the playback time. useEffect triggered by pause state
   useEffect(() => {
     let interval = null
     if (!pause) {
       interval = setInterval(() => {
-        getPlaybackState()
-      }, 250);
+        getTimeStamp()
+      }, 1000)
     } else {
-      clearInterval(interval);
+      clearInterval(interval)
     }
     return () => {
-      clearInterval(interval);
+      clearInterval(interval)
     }
   }, [pause])
   
+  useEffect(() => {
+    let interval = null
+    if (!pause && segmentIndex) {
+      let i = segmentIndex
+      let segmentDelay = analysis.segments[i].duration * 1000
+      if (i < analysis.segments.length){
+        const loopSegments = () => {
+          interval = setTimeout(() => {
+            i++
+            segmentDelay = analysis.segments[i+1].duration * 1000
+            setSegmentData(analysis.segments[i+1])
+            console.log(analysis.segments[i+1].loudness_max)
+            loopSegments()
+          }, segmentDelay)
+        }
+        loopSegments()
+      }
+    } else {
+      clearInterval(interval)
+    }
+    return () => {
+      clearInterval(interval)
+    }
+  }, [pause])
+
+
+  // Binary search array of segments to find out which current segment we are in
+  const bSearch = (arr, x) => {
+    let start = 0, end = arr.length - 1
+    while (start <= end){
+      let mid = Math.floor((start + end) / 2)
+      if (arr[mid].start === x) return start
+      else if (arr[mid].start < x)
+        start = mid + 1
+      else
+        end = mid - 1
+    }
+    return start
+  }
+
   // Converts song time in ms to minutes and seconds (XX:XX) format 
   const millisToMinutesAndSeconds = (millis) => {
-    let minutes = Math.floor(millis / 60000);
-    let seconds = ((millis % 60000) / 1000).toFixed(0);
-    return minutes + ":" + (seconds < 10 ? '0' : '') + seconds;
+    let minutes = Math.floor(millis / 60000)
+    let seconds = ((millis % 60000) / 1000).toFixed(0)
+    return minutes + ":" + (seconds < 10 ? '0' : '') + seconds
   }
 
   // Styling object
@@ -273,28 +358,17 @@ function App() {
           {/* Center */}
 
           <Container fluid className='d-flex align-items-center justify-content-center text-center' style={style.jumbotron}>
-            {/* <Canvas style={{height: '100vh', width: '100vw'}}>
-              <ambientLight />
-              <pointLight position={[10, 10, 10]} />
-              <Box position={[-1.2, 0, 0]} />
-              <Box position={[1.2, 0, 0]} />
-            </Canvas> */}
-
-            {/* Temporary just to show data changing */}
-            <Col lg={4}>
-              Playback State: {"\n"}
-              {JSON.stringify(playbackState, null , '\n')}
-            </Col> 
-
-            <Col lg={4}>
-              Features State: {"\n"}
-              {JSON.stringify(features, null , '\n')}
-            </Col>
-              
-            <Col lg={4}>
-              Analysis State: {"\n"}
-              {JSON.stringify(analysis, null , '\n')}
-            </Col>
+            <Canvas style={{height: '100vh', width: '100vw'}}>
+              <color attach="background" args={[analysis? `hsl(${Math.floor(analysis.key * 30)}, ${analysis.keyConf * 100}%, 95%)` : 'white']} />
+              <ambientLight intensity={1}/>
+              <pointLight position={[10,10,10]} />
+              <Box 
+                position={[0,0,0]} 
+                segmentData={segmentData} 
+                tempo={features ? features.tempo : 100}
+                color={features}
+              />
+            </Canvas>
           </Container>
 
           {/* Footer */}
@@ -340,51 +414,105 @@ function App() {
               </Row>
               <Row>
                 <Col md={1}>
-                  <h6>{playbackState ? playbackState.progress : `00:00`}</h6>
+                  <h6>{playTime ? millisToMinutesAndSeconds(playTime.progress) : `00:00`}</h6>
                 </Col>
                 <Col md={10}>
-                  <ProgressBar variant="light" now={playbackState ? playbackState.progress / playbackState.duration * 100 : 0}/>
+                  <ProgressBar variant="light" now={playTime ? playTime.progress / playTime.duration * 100 : 0}/>
                 </Col>
                 <Col md={1}>
-                  <h6>{playbackState ? playbackState.duration : `00:00`}</h6>
+                  <h6>{playTime ? millisToMinutesAndSeconds(playTime.duration) : `00:00`}</h6>
                 </Col>
               </Row>
             </Col>
             
             <Col className='d-flex justify-content-end'>
               <Button variant="link" className='me-3'>
-              <svg width='1.5rem' height='1.5rem' className='d-block' onClick={getPlaybackState}><path d={style.refreshSvgPath}/></svg>
+              <svg width='1.5rem' height='1.5rem' className='d-block' onClick={refreshStates}><path d={style.refreshSvgPath}/></svg>
               </Button>
             </Col>
           </Navbar>
         </div>
       }
     </div>
-  );
+  )
 }
 
 function Box(props) {
   // This reference gives us direct access to the THREE.Mesh object
   const ref = useRef()
-  // Hold state for hovered and clicked events
-  const [hovered, hover] = useState(false)
-  const [clicked, click] = useState(false)
+
   // Subscribe this component to the render-loop, rotate the mesh every frame
-  useFrame((state, delta) => (ref.current.rotation.x += 0.01))
+  useFrame((state, delta) => (ref.current.rotation.y += Math.PI / 180 / 3 * (props.tempo / 100) ))
   // Return the view, these are regular Threejs elements expressed in JSX
+
+  let coord1 = 1, coord2 = 1, coord3 = 1, coord4 = 1, coord5 = 1, coord6 = 1, coord7 = 1, coord8 = 1, coord9 = 1, coord10 = 1, coord11 = 1, coord12 = 1 
+
+  if (props.segmentData) { 
+    coord1 = props.segmentData.pitches[0]
+    coord2 = props.segmentData.pitches[1]
+    coord3 = props.segmentData.pitches[2]
+    coord4 = props.segmentData.pitches[3]
+    coord5 = props.segmentData.pitches[4]
+    coord6 = props.segmentData.pitches[5]
+    coord7 = props.segmentData.pitches[6]
+    coord8 = props.segmentData.pitches[7]
+    coord9 = props.segmentData.pitches[8]
+    coord10 = props.segmentData.pitches[9]
+    coord11 = props.segmentData.pitches[10] 
+    coord12 = props.segmentData.pitches[11]
+  }
+
+  const t = 1.618
+  const positions = new Float32Array([
+    -1*coord1,t*coord1,0,   1*coord2,t*coord2,0,    -1*coord3,-t*coord3,0,    1*coord4,-t*coord4,0,
+    0,-1*coord5,t*coord5,   0,1*coord6,t*coord6,    0,-1*coord7,-t*coord7,    0,1*coord8,-t*coord8,
+    t*coord9,0,-1*coord9,   t*coord10,0,1*coord10,    -t*coord11,0,-1*coord11,    -t*coord12,0,1*coord12
+  ])
+
+  const indices = new Uint16Array([
+    0,11,5,   0,5,1,    0,1,7,    0,7,10,   0,10,11,
+    1,5,9,    5,11,4,   11,10,2,  10,7,6,   7,1,8,
+    3,9,4,    3,4,2,    3,2,6,    3,6,8,    3,8,9,
+    4,9,5,    2,4,11,   6,2,10,   8,6,7,    9,8,1
+  ])
+
+  let posRef = useRef()
+
+  useFrame(() => {
+    posRef.current.needsUpdate = true
+  })
+
+  let color = 'black'
+  if (props.color) {
+    color = `hsl(${Math.floor(props.color.danceability * 360)}, ${Math.floor(props.color.energy * 100)}%, ${Math.floor(props.color.valence * 100)}%)`
+  }
+  // console.log(color)
+
   return (
     <mesh
       {...props}
       ref={ref}
-      scale={clicked ? 1.5 : 1}
-      onClick={(event) => click(!clicked)}
-      onPointerOver={(event) => hover(true)}
-      onPointerOut={(event) => hover(false)}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color={hovered ? 'hotpink' : 'orange'} />
+    >
+        
+      {/* <polyhedronGeometry args={[positions, indices]} /> */}
+      <bufferGeometry>
+            <bufferAttribute
+                attach='attributes-position'
+                array={positions}
+                count={positions.length / 3}
+                itemSize={3}
+                ref={posRef}
+            />
+            <bufferAttribute
+                attach="index"
+                array={indices}
+                count={indices.length}
+            />
+        </bufferGeometry>
+      <meshBasicMaterial wireframe={true} color={color}/>
     </mesh>
   )
 }
 
 
-export default App;
+export default App
